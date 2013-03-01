@@ -4,6 +4,7 @@ use Mouse;
 use IO::Socket;
 use Data::MessagePack;
 use Riak::PBC;
+use Carp ();
 
 our $VERSION = '0.01';
 
@@ -35,15 +36,16 @@ has timeout => (
 );
 
 has client => (
-    is      => 'rw',
-    isa     => 'IO::Handle',
-    default => sub {
+    is       => 'rw',
+    isa      => 'IO::Handle',
+    required => 1,
+    default  => sub {
         IO::Socket::INET->new(
             PeerAddr => $_[0]->server,
             PeerPort => $_[0]->port,
             Proto    => 'tcp',
             Timeout  => $_[0]->timeout,
-        ) or die "failed to connect ".$_[0]->server.": $!";
+        ) or Carp::croak("failed to connect ".$_[0]->server.": $!");
     },
 );
 
@@ -69,7 +71,7 @@ sub get {
 
     return unless $response->content; # value is now exists.
     return Data::MessagePack->unpack($response->content->value);
-};
+}
 
 sub set {
     my ($self, $key, $value) = @_;
@@ -96,7 +98,7 @@ sub set {
         return 1; # set success
     }
     return;
-};
+}
 
 sub delete {
     my ($self, $key) = @_;
@@ -117,10 +119,26 @@ sub delete {
         return 1; # delete success
     }
     return;
-};
+}
+
+sub DESTROY {
+    my $self = shift;
+
+    $self->client->close;
+}
 
 sub _send_request {
     my ($self, $packed_request) = @_;
+
+    unless ($self->client->connected) {
+        $self->client(IO::Socket::INET->new(
+                PeerAddr => $self->server,
+                PeerPort => $self->port,
+                Proto    => 'tcp',
+                Timeout  => $self->timeout,
+            ) or Carp::croak("failed to connect ".$self->server.": $!")
+        );
+    }
 
     $self->client->print($packed_request);
 
@@ -132,7 +150,7 @@ sub _send_request {
     $self->client->read($msg, $len - 1);
 
     return ($code, $msg);
-};
+}
 
 no Mouse;
 __PACKAGE__->meta->make_immutable;
