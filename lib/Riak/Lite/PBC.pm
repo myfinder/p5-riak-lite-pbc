@@ -4,9 +4,9 @@ use Mouse;
 use IO::Socket;
 use Data::MessagePack;
 use Riak::PBC;
-use Carp ();
+use Time::HiRes qw/ualarm/;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 has server => (
     is      => 'rw',
@@ -45,7 +45,7 @@ has client => (
             PeerPort => $_[0]->port,
             Proto    => 'tcp',
             Timeout  => $_[0]->timeout,
-        ) or Carp::croak("failed to connect ".$_[0]->server.": $!");
+        ) or die "failed to connect ".$_[0]->server.": $!";
     },
 );
 
@@ -136,20 +136,35 @@ sub _send_request {
                 PeerPort => $self->port,
                 Proto    => 'tcp',
                 Timeout  => $self->timeout,
-            ) or Carp::croak("failed to connect ".$self->server.": $!")
+            ) or die "failed to connect $self->server: $!"
         );
     }
 
-    $self->client->print($packed_request);
-
     my ($len, $code, $msg);
-    $self->client->read($len, 4);
-    $len = unpack('N', $len);
-    $self->client->read($code, 1);
-    $code = unpack('c', $code);
-    $self->client->read($msg, $len - 1);
+
+    eval {
+        local $SIG{ALRM} = sub { die };
+        ualarm($self->timeout * 1000000);
+
+        $self->client->print($packed_request);
+
+        _check($self->client->read($len, 4));
+        $len = unpack('N', $len);
+        _check($self->client->read($code, 1));
+        $code = unpack('c', $code);
+        _check($self->client->read($msg, $len - 1));
+
+        ualarm 0;
+    };
+    if ($@) {
+        die "failed request, read timeout: $!";
+    }
 
     return ($code, $msg);
+}
+
+sub _check {
+    defined $_[0] or die "failed reading from socket: $!";
 }
 
 no Mouse;
