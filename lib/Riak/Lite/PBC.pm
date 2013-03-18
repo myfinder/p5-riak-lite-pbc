@@ -142,23 +142,18 @@ sub _send_request {
 
     my ($len, $code, $msg);
 
-    eval {
-        local $SIG{ALRM} = sub { die };
-        ualarm($self->timeout * 1000000);
+    local $SIG{ALRM} = sub { die "failed request, read timeout: $!" };
+    ualarm($self->timeout * 1000000);
 
-        $self->client->print($packed_request);
+    $self->client->print($packed_request);
 
-        _check($self->client->read($len, 4));
-        $len = unpack('N', $len);
-        _check($self->client->read($code, 1));
-        $code = unpack('c', $code);
-        _check($self->client->read($msg, $len - 1));
+    _check($self->client->read($len, 4));
+    $len = unpack('N', $len);
+    _check($self->client->read($code, 1));
+    $code = unpack('c', $code);
+    _check($self->client->read($msg, $len - 1));
 
-        ualarm 0;
-    };
-    if ($@) {
-        die "failed request, read timeout: $!";
-    }
+    ualarm 0;
 
     return ($code, $msg);
 }
