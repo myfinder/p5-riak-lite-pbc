@@ -32,7 +32,7 @@ has timeout => (
     is      => 'rw',
     isa     => 'Num',
     lazy    => 1,
-    default => 0.05,
+    default => 0.5,
 );
 
 has client => (

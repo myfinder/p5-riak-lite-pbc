@@ -59,6 +59,6 @@ sub run {
     my $self = shift;
 
     while (my $remote = $self->{sock}->accept) {
-        usleep 1000000; # 100ms sleep.
+        usleep 1000000; # 1sec sleep.
     }
 }
