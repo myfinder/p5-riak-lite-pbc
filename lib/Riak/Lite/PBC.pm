@@ -4,9 +4,8 @@ use Mouse;
 use IO::Socket;
 use Data::MessagePack;
 use Riak::PBC;
-use Time::HiRes qw/ualarm/;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 has server => (
     is      => 'rw',
@@ -37,7 +36,7 @@ has timeout => (
 
 has client => (
     is       => 'rw',
-    isa      => 'IO::Handle',
+    isa      => 'Maybe[IO::Handle]',
     required => 1,
     default  => sub {
         IO::Socket::INET->new(
@@ -64,7 +63,10 @@ sub get {
 
     my ($code, $msg) = $self->_send_request($packed_request);
 
-    return if $code ne 10; # error case
+    if ($code != 10) {
+        warn "invalid response: $code";
+        return;
+    }
 
     my $response = Riak::PBC::RpbGetResp->new;
     $response->unpack($msg);
@@ -94,9 +96,12 @@ sub set {
 
     my ($code, $msg) = $self->_send_request($packed_request);
 
-    if ($code eq 12) {
+    if ($code == 12) {
         return 1; # set success
     }
+
+    warn "invalid response: $code";
+
     return;
 }
 
@@ -115,9 +120,12 @@ sub delete {
 
     my ($code, $msg) = $self->_send_request($packed_request);
 
-    if ($code eq 14) {
+    if ($code == 14) {
         return 1; # delete success
     }
+
+    warn "invalid response: $code";
+
     return;
 }
 
@@ -140,26 +148,28 @@ sub _send_request {
         );
     }
 
-    my ($len, $code, $msg);
-
-    local $SIG{ALRM} = sub { die "failed request, read timeout: $!" };
-    ualarm($self->timeout * 1000000);
-
     $self->client->print($packed_request);
 
-    _check($self->client->read($len, 4));
-    $len = unpack('N', $len);
-    _check($self->client->read($code, 1));
-    $code = unpack('c', $code);
-    _check($self->client->read($msg, $len - 1));
-
-    ualarm 0;
+    my ($len, $code, $msg);
+    eval {
+        _check($self->client->read($len, 4)) or die "can't read len";
+        $len = unpack('N', $len);
+        _check($self->client->read($code, 1)) or die "can't read code";
+        $code = unpack('c', $code);
+        _check($self->client->read($msg, $len - 1)) or die "can't read msg";
+    };
+    if ($@) {
+        warn $@;
+        $self->client->close;
+        $self->client(undef);
+        return(0, '');
+    }
 
     return ($code, $msg);
 }
 
 sub _check {
-    defined $_[0] or die "failed reading from socket: $!";
+    defined $_[0] or return;
 }
 
 no Mouse;

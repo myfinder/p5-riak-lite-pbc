@@ -8,3 +8,4 @@ __DATA__
 Tatsuro Hisamori
 myfinder@cpan.org
 Riak::Lite::PBC
+API
