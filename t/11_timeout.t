@@ -11,30 +11,33 @@ skip_unless_riak;
 
 my $bucket_name = create_test_bucket_name;
 
-subtest 'default 50ms timeout test' => sub {
-    test_tcp(
-        client => sub {
-            my $port = shift;
-            my $riak = Riak::Lite::PBC->new(
-                port   => $port,
-                bucket => $bucket_name,
-            );
-            dies_ok {
-                $riak->set('key','value');
-            } 'set time out ok';
-            dies_ok {
-                $riak->get('key');
-            } 'get time out ok';
-            dies_ok {
-                $riak->delete('key');
-            } 'delete time out ok';
-        },
-        server => sub {
-            my $port = shift;
-            DummyRiakServer->new($port)->run;
-        },
-    );
-};
+TODO: {
+    todo_skip "Have not supported read timeout yet.", 1;
+    subtest 'default 50ms timeout test' => sub {
+        test_tcp(
+            client => sub {
+                my $port = shift;
+                my $riak = Riak::Lite::PBC->new(
+                    port   => $port,
+                    bucket => $bucket_name,
+                );
+                dies_ok {
+                    $riak->set('key','value');
+                } 'set time out ok';
+                dies_ok {
+                    $riak->get('key');
+                } 'get time out ok';
+                dies_ok {
+                    $riak->delete('key');
+                } 'delete time out ok';
+            },
+            server => sub {
+                my $port = shift;
+                DummyRiakServer->new($port)->run;
+            },
+        );
+    };
+}
 
 done_testing;
 
