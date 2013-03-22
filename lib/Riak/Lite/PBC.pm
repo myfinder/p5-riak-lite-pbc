@@ -158,26 +158,32 @@ sub _send_request {
 
     $self->write_timeout($socket, $packed_request, length($packed_request), 0, $timeout_at);
 
-    my ($len, $code, $msg);
-    eval {
-        my $n = $self->read_timeout($socket, \$len, 4, 0, $timeout_at);
-        if (! $n) {
-            if ($in_keep_alive && length $len == 0 &&
+    my $len;
+    my $n = $self->read_timeout($socket, \$len, 4, 0, $timeout_at);
+    if (! $n) {
+        if ($in_keep_alive && length $len == 0 &&
                                             (defined $n || $! == ECONNRESET)) {
-                # Retry if the connection was the old one.
-                return $self->_send_request($packed_request);
-            }
-            die "can't read len";
+            # Retry if the connection was the old one.
+            return $self->_send_request($packed_request);
         }
+        return (0, '');
+    } elsif ($n != 4) {
+        die "[BUG] unexpected \$len length: $n";
+    }
+    $len = unpack('N', $len);
 
-        $len = unpack('N', $len);
-        _check($self->read_timeout($socket, \$code, 1, 0, $timeout_at)) or die "can't read code";
-        $code = unpack('c', $code);
-        _check($self->read_timeout($socket, \$msg, $len - 1, 0, $timeout_at)) or die "can't read msg";
-    };
-    if ($@) {
-        warn $@;
-        return(0, '');
+    my $code;
+    $n = $self->read_timeout($socket, \$code, 1, 0, $timeout_at);
+    return (0, '') unless $n;
+    die "[BUG] unexpected \$code length: $n" unless $n == 1;
+    $len -= $n;
+    $code = unpack('c', $code);
+
+    my $msg = '';
+    while ($len > 0) {
+        $n = $self->read_timeout($socket, \$msg, $len, length $msg, $timeout_at);
+        return (0, '') unless $n;
+        $len -= $n;
     }
 
     # Keep the connection for next requests.
