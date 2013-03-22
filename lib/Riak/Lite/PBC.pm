@@ -156,12 +156,19 @@ sub _send_request {
     $self->write_timeout($packed_request, length($packed_request), 0);
 
     my ($len, $code, $msg);
-    $self->read_timeout(\$len, 4, 0) or die "can't read len";
-    $len = unpack('N', $len);
-    $self->read_timeout(\$code, 1, 0) or die "can't read code";
-    $code = unpack('c', $code);
-    return ($code, '') if $len == 1; # empty?
-    $self->read_timeout(\$msg, $len - 1, 0) or die "can't read msg";
+    eval {
+        _check($self->client->read_timeout(\$len, 4, 0)) or die "can't read len";
+        $len = unpack('N', $len);
+        _check($self->client->read_timeout(\$code, 1, 0)) or die "can't read code";
+        $code = unpack('c', $code);
+        _check($self->client->read_timeout(\$msg, $len - 1, 0)) or die "can't read msg";
+    };
+    if ($@) {
+        warn $@;
+        $self->client->close;
+        $self->client(undef);
+        return(0, '');
+    }
 
     return ($code, $msg);
 }
