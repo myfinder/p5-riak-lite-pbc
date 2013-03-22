@@ -36,20 +36,9 @@ has timeout => (
     default => 0.5,
 );
 
-has client => (
+has _active_socket => (
     is       => 'rw',
     isa      => 'Maybe[IO::Handle]',
-    required => 1,
-    default  => sub {
-        my $client = IO::Socket::INET->new(
-            PeerAddr => $_[0]->server,
-            PeerPort => $_[0]->port,
-            Proto    => 'tcp',
-            Timeout  => $_[0]->timeout,
-        ) or die "failed to connect ".$_[0]->server.": $!";
-        $client->blocking(0);
-        $client;
-    },
 );
 
 sub get {
@@ -136,45 +125,61 @@ sub delete {
 sub DESTROY {
     my $self = shift;
 
-    $self->client->close;
+    my $socket = $self->_active_socket;
+    $socket->close if $socket;
+}
+
+sub _connect {
+    my $self = shift;
+    my $client = IO::Socket::INET->new(
+        PeerAddr => $self->server,
+        PeerPort => $self->port,
+        Proto    => 'tcp',
+        Timeout  => $self->timeout,
+    ) or die "failed to connect ${\ $self->server}: $!";
+    $client->blocking(0);
+    $client;
 }
 
 sub _send_request {
     my ($self, $packed_request) = @_;
 
-    unless ($self->client->connected) {
-        $self->client(IO::Socket::INET->new(
-                PeerAddr => $self->server,
-                PeerPort => $self->port,
-                Proto    => 'tcp',
-                Timeout  => $self->timeout,
-            ) or die "failed to connect $self->server: $!"
-        );
-        $self->client->blocking(0);
+    my ($socket, $in_keep_alive);
+    if ($self->_active_socket) {
+        $socket = $self->_active_socket;
+        $self->_active_socket(undef);
+        $in_keep_alive++;
+    } else {
+        $socket = $self->_connect;
     }
 
-    $self->write_timeout($packed_request, length($packed_request), 0);
+    $self->write_timeout($socket, $packed_request, length($packed_request), 0);
 
     my ($len, $code, $msg);
     eval {
-        _check($self->client->read_timeout(\$len, 4, 0)) or die "can't read len";
+        _check($self->read_timeout($socket, \$len, 4, 0)) or die "can't read len";
         $len = unpack('N', $len);
-        _check($self->client->read_timeout(\$code, 1, 0)) or die "can't read code";
+        _check($self->read_timeout($socket, \$code, 1, 0)) or die "can't read code";
         $code = unpack('c', $code);
-        _check($self->client->read_timeout(\$msg, $len - 1, 0)) or die "can't read msg";
+        _check($self->read_timeout($socket, \$msg, $len - 1, 0)) or die "can't read msg";
     };
     if ($@) {
         warn $@;
-        $self->client->close;
-        $self->client(undef);
+
+        # Retry if the connection was the old one.
+        return $self->_send_request($packed_request) if $in_keep_alive;
+
         return(0, '');
     }
+
+    # Keep the connection for next requests.
+    $self->_active_socket($socket);
 
     return ($code, $msg);
 }
 
 sub _select {
-    my ($self, $is_write, $timeout_at) = @_;
+    my ($self, $socket, $is_write, $timeout_at) = @_;
 
     while (1) {
         my $timeout = $timeout_at - time;
@@ -184,7 +189,7 @@ sub _select {
         }
         my($rfd, $wfd);
         my $efd = '';
-        vec($efd, $self->client->fileno, 1) = 1;
+        vec($efd, $socket->fileno, 1) = 1;
         if ($is_write) {
             $wfd = $efd;
         } else {
@@ -197,12 +202,12 @@ sub _select {
 }
 
 sub read_timeout {
-    my ($self, $buf, $len, $off) = @_;
+    my ($self, $socket, $buf, $len, $off) = @_;
     my $res;
     my $timeout_at = time + $self->timeout;
 
     while (1) {
-        defined($res = $self->client->sysread($$buf, $len, $off))
+        defined($res = $socket->sysread($$buf, $len, $off))
             and return $res;
         if ($! == EAGAIN || $! == EWOULDBLOCK || $! == EINTR) {
             # do nothing
@@ -210,17 +215,17 @@ sub read_timeout {
             return undef;
         }
 
-        $self->_select(0, $timeout_at) or return undef;
+        $self->_select($socket, 0, $timeout_at) or return undef;
     }
 }
 
 sub write_timeout {
-    my ($self, $buf, $len, $off) = @_;
+    my ($self, $socket, $buf, $len, $off) = @_;
     my $res;
     my $timeout_at = time + $self->timeout;
 
     while (1) {
-        defined($res = $self->client->syswrite($buf, $len, $off))
+        defined($res = $socket->syswrite($buf, $len, $off))
             and return $res;
         if ($! == EAGAIN || $! == EWOULDBLOCK || $! == EINTR) {
             # do nothing
@@ -228,7 +233,7 @@ sub write_timeout {
             return undef;
         }
 
-        $self->_select(1, $timeout_at) or return undef;
+        $self->_select($socket, 1, $timeout_at) or return undef;
     }
 }
 
