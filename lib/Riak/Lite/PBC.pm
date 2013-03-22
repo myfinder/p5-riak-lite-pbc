@@ -57,7 +57,7 @@ sub get {
     my ($code, $msg) = $self->_send_request($packed_request);
 
     if ($code != 10) {
-        warn "invalid response: $code";
+        warn "invalid response: $code" if $code >= 0;
         return;
     }
 
@@ -93,7 +93,7 @@ sub set {
         return 1; # set success
     }
 
-    warn "invalid response: $code";
+    warn "invalid response: $code" if $code >= 0;
 
     return;
 }
@@ -117,7 +117,7 @@ sub delete {
         return 1; # delete success
     }
 
-    warn "invalid response: $code";
+    warn "invalid response: $code" if $code >= 0;
 
     return;
 }
@@ -166,7 +166,7 @@ sub _send_request {
             # Retry if the connection was the old one.
             return $self->_send_request($packed_request);
         }
-        return (0, '');
+        return (-1, '');
     } elsif ($n != 4) {
         die "[BUG] unexpected \$len length: $n";
     }
@@ -174,7 +174,7 @@ sub _send_request {
 
     my $code;
     $n = $self->read_timeout($socket, \$code, 1, 0, $timeout_at);
-    return (0, '') unless $n;
+    return (-1, '') unless $n;
     die "[BUG] unexpected \$code length: $n" unless $n == 1;
     $len -= $n;
     $code = unpack('c', $code);
@@ -182,7 +182,7 @@ sub _send_request {
     my $msg = '';
     while ($len > 0) {
         $n = $self->read_timeout($socket, \$msg, $len, length $msg, $timeout_at);
-        return (0, '') unless $n;
+        return (-1, '') unless $n;
         $len -= $n;
     }
 
