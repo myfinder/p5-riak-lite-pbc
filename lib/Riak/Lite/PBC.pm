@@ -249,10 +249,6 @@ sub write_timeout {
     }
 }
 
-sub _check {
-    defined $_[0] or return;
-}
-
 no Mouse;
 __PACKAGE__->meta->make_immutable;
 1;
