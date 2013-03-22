@@ -140,6 +140,15 @@ sub _connect_timeout {
         Timeout  => $timeout,
     ) or die "failed to connect ${\ $self->server}: $!";
     $client->blocking(0);
+
+    {
+        # Don't use buffering
+        my $orig = select;
+        select $client;
+        local $| = 1;
+        select $orig;
+    }
+
     $client;
 }
 
