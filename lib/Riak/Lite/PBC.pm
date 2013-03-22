@@ -129,23 +129,25 @@ sub DESTROY {
     $socket->close if $socket;
 }
 
-sub _connect {
-    my $self = shift;
+sub _connect_timeout {
+    my ($self, $timeout_at) = @_;
+    my $timeout = $timeout_at - time;
+
     my $client = IO::Socket::INET->new(
         PeerAddr => $self->server,
         PeerPort => $self->port,
         Proto    => 'tcp',
-        Timeout  => $self->timeout,
+        Timeout  => $timeout,
     ) or die "failed to connect ${\ $self->server}: $!";
     $client->blocking(0);
     $client;
 }
 
 sub _send_request {
-    my ($self, $packed_request) = @_;
+    my ($self, $packed_request, $timeout_at) = @_;
 
     # Check timeout
-    my $timeout_at = time + $self->timeout;
+    $timeout_at //= time + $self->timeout;
 
     my ($socket, $in_keep_alive);
     if ($self->_active_socket) {
@@ -153,7 +155,7 @@ sub _send_request {
         $self->_active_socket(undef);
         $in_keep_alive++;
     } else {
-        $socket = $self->_connect;
+        $socket = $self->_connect_timeout($timeout_at);
     }
 
     $self->write_timeout($socket, $packed_request, length($packed_request), 0, $timeout_at);
@@ -164,7 +166,7 @@ sub _send_request {
         if ($in_keep_alive && length $len == 0 &&
                                             (defined $n || $! == ECONNRESET)) {
             # Retry if the connection was the old one.
-            return $self->_send_request($packed_request);
+            return $self->_send_request($packed_request, $timeout_at);
         }
         return (-1, '');
     } elsif ($n != 4) {

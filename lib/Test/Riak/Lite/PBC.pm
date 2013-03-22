@@ -26,10 +26,10 @@ sub create_test_bucket_name {
 }
 
 sub skip_unless_riak {
-    eval {
-        Riak::Lite::PBC->new(bucket => 'test-riak')->_connect;
+    my $ret = eval {
+        Riak::Lite::PBC->new(bucket => 'test-riak')->_connect_timeout(10);
     };
-    if ($@) {
+    if (! $ret || $@) {
         plan skip_all => 'no response from Riak, skip all tests';
     };
 }
