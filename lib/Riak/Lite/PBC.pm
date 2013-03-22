@@ -138,8 +138,12 @@ sub _connect_timeout {
         PeerPort => $self->port,
         Proto    => 'tcp',
         Timeout  => $timeout,
-    ) or die "failed to connect ${\ $self->server}: $!";
-    $client->blocking(0);
+        Blocking => 0,
+    );
+    unless ($client) {
+        warn "failed to connect ${\ $self->server}: $!";
+        return;
+    }
 
     {
         # Don't use buffering
@@ -164,7 +168,7 @@ sub _send_request {
         $self->_active_socket(undef);
         $in_keep_alive++;
     } else {
-        $socket = $self->_connect_timeout($timeout_at);
+        $socket = $self->_connect_timeout($timeout_at) or return (-1, '');
     }
 
     $self->write_timeout($socket, $packed_request, length($packed_request), 0, $timeout_at);
