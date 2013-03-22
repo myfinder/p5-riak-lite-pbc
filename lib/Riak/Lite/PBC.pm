@@ -4,7 +4,7 @@ use Mouse;
 use IO::Socket;
 use Data::MessagePack;
 use Riak::PBC;
-use Errno qw(EAGAIN EINTR EWOULDBLOCK);
+use Errno qw(EAGAIN EINTR EWOULDBLOCK ECONNRESET);
 use Time::HiRes 'time';
 
 our $VERSION = '0.03';
@@ -144,6 +144,9 @@ sub _connect {
 sub _send_request {
     my ($self, $packed_request) = @_;
 
+    # Check timeout
+    my $timeout_at = time + $self->timeout;
+
     my ($socket, $in_keep_alive);
     if ($self->_active_socket) {
         $socket = $self->_active_socket;
@@ -153,22 +156,27 @@ sub _send_request {
         $socket = $self->_connect;
     }
 
-    $self->write_timeout($socket, $packed_request, length($packed_request), 0);
+    $self->write_timeout($socket, $packed_request, length($packed_request), 0, $timeout_at);
 
     my ($len, $code, $msg);
     eval {
-        _check($self->read_timeout($socket, \$len, 4, 0)) or die "can't read len";
+        my $n = $self->read_timeout($socket, \$len, 4, 0, $timeout_at);
+        if (! $n) {
+            if ($in_keep_alive && length $len == 0 &&
+                                            (defined $n || $! == ECONNRESET)) {
+                # Retry if the connection was the old one.
+                return $self->_send_request($packed_request);
+            }
+            die "can't read len";
+        }
+
         $len = unpack('N', $len);
-        _check($self->read_timeout($socket, \$code, 1, 0)) or die "can't read code";
+        _check($self->read_timeout($socket, \$code, 1, 0, $timeout_at)) or die "can't read code";
         $code = unpack('c', $code);
-        _check($self->read_timeout($socket, \$msg, $len - 1, 0)) or die "can't read msg";
+        _check($self->read_timeout($socket, \$msg, $len - 1, 0, $timeout_at)) or die "can't read msg";
     };
     if ($@) {
         warn $@;
-
-        # Retry if the connection was the old one.
-        return $self->_send_request($packed_request) if $in_keep_alive;
-
         return(0, '');
     }
 
@@ -202,9 +210,8 @@ sub _select {
 }
 
 sub read_timeout {
-    my ($self, $socket, $buf, $len, $off) = @_;
+    my ($self, $socket, $buf, $len, $off, $timeout_at) = @_;
     my $res;
-    my $timeout_at = time + $self->timeout;
 
     while (1) {
         defined($res = $socket->sysread($$buf, $len, $off))
@@ -220,9 +227,8 @@ sub read_timeout {
 }
 
 sub write_timeout {
-    my ($self, $socket, $buf, $len, $off) = @_;
+    my ($self, $socket, $buf, $len, $off, $timeout_at) = @_;
     my $res;
-    my $timeout_at = time + $self->timeout;
 
     while (1) {
         defined($res = $socket->syswrite($buf, $len, $off))
