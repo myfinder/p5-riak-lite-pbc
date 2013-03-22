@@ -185,7 +185,6 @@ sub _select {
         }
         my $nfound = select($rfd, $wfd, $efd, $timeout);
         return 1 if $nfound > 0;
-        return 0 if $nfound == -1 && $! == EINTR;
     }
     die 'not reached';
 }
