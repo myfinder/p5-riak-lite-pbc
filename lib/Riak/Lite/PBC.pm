@@ -4,6 +4,8 @@ use Mouse;
 use IO::Socket;
 use Data::MessagePack;
 use Riak::PBC;
+use Errno qw(EAGAIN EINTR EWOULDBLOCK);
+use Time::HiRes 'time';
 
 our $VERSION = '0.03';
 
@@ -39,12 +41,14 @@ has client => (
     isa      => 'Maybe[IO::Handle]',
     required => 1,
     default  => sub {
-        IO::Socket::INET->new(
+        my $client = IO::Socket::INET->new(
             PeerAddr => $_[0]->server,
             PeerPort => $_[0]->port,
             Proto    => 'tcp',
             Timeout  => $_[0]->timeout,
         ) or die "failed to connect ".$_[0]->server.": $!";
+        $client->blocking(0);
+        $client;
     },
 );
 
@@ -146,26 +150,80 @@ sub _send_request {
                 Timeout  => $self->timeout,
             ) or die "failed to connect $self->server: $!"
         );
+        $self->client->blocking(0);
     }
 
-    $self->client->print($packed_request);
+    $self->write_timeout($packed_request, length($packed_request), 0);
 
     my ($len, $code, $msg);
-    eval {
-        _check($self->client->read($len, 4)) or die "can't read len";
-        $len = unpack('N', $len);
-        _check($self->client->read($code, 1)) or die "can't read code";
-        $code = unpack('c', $code);
-        _check($self->client->read($msg, $len - 1)) or die "can't read msg";
-    };
-    if ($@) {
-        warn $@;
-        $self->client->close;
-        $self->client(undef);
-        return(0, '');
-    }
+    $self->read_timeout(\$len, 4, 0) or die "can't read len";
+    $len = unpack('N', $len);
+    $self->read_timeout(\$code, 1, 0) or die "can't read code";
+    $code = unpack('c', $code);
+    return ($code, '') if $len == 1; # empty?
+    $self->read_timeout(\$msg, $len - 1, 0) or die "can't read msg";
 
     return ($code, $msg);
+}
+
+sub _select {
+    my ($self, $is_write, $timeout_at) = @_;
+
+    while (1) {
+        my $timeout = $timeout_at - time;
+        if ($timeout <= 0) {
+            $! = 0;
+            return 0;
+        }
+        my($rfd, $wfd);
+        my $efd = '';
+        vec($efd, $self->client->fileno, 1) = 1;
+        if ($is_write) {
+            $wfd = $efd;
+        } else {
+            $rfd = $efd;
+        }
+        my $nfound = select($rfd, $wfd, $efd, $timeout);
+        return 1 if $nfound > 0;
+        return 0 if $nfound == -1 && $! == EINTR;
+    }
+    die 'not reached';
+}
+
+sub read_timeout {
+    my ($self, $buf, $len, $off) = @_;
+    my $res;
+    my $timeout_at = time + $self->timeout;
+
+    while (1) {
+        defined($res = $self->client->sysread($$buf, $len, $off))
+            and return $res;
+        if ($! == EAGAIN || $! == EWOULDBLOCK || $! == EINTR) {
+            # do nothing
+        } else {
+            return undef;
+        }
+
+        $self->_select(0, $timeout_at) or return undef;
+    }
+}
+
+sub write_timeout {
+    my ($self, $buf, $len, $off) = @_;
+    my $res;
+    my $timeout_at = time + $self->timeout;
+
+    while (1) {
+        defined($res = $self->client->syswrite($buf, $len, $off))
+            and return $res;
+        if ($! == EAGAIN || $! == EWOULDBLOCK || $! == EINTR) {
+            # do nothing
+        } else {
+            return undef;
+        }
+
+        $self->_select(1, $timeout_at) or return undef;
+    }
 }
 
 sub _check {
