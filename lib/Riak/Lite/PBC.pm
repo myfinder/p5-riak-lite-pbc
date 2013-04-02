@@ -7,7 +7,7 @@ use Riak::PBC;
 use Errno qw(EAGAIN EINTR EWOULDBLOCK ECONNRESET);
 use Time::HiRes 'time';
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 has server => (
     is      => 'rw',
@@ -36,6 +36,13 @@ has timeout => (
     default => 0.5,
 );
 
+has read_quorum => (
+    is      => 'rw',
+    isa     => 'Num',
+    lazy    => 1,
+    default => 1,
+);
+
 has _active_socket => (
     is       => 'rw',
     isa      => 'Maybe[IO::Handle]',
@@ -47,6 +54,7 @@ sub get {
     my $req = Riak::PBC::RpbGetReq->new;
     $req->set_bucket($self->bucket);
     $req->set_key($key);
+    $req->set_r($self->read_quorum);
 
     my $h = pack('c', 9) . $req->pack;
     use bytes;
