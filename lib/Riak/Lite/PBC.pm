@@ -7,7 +7,7 @@ use Riak::PBC;
 use Errno qw(EAGAIN EINTR EWOULDBLOCK ECONNRESET);
 use Time::HiRes 'time';
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 has server => (
     is      => 'rw',
@@ -43,6 +43,27 @@ has read_quorum => (
     default => 1,
 );
 
+has write_quorum => (
+    is      => 'rw',
+    isa     => 'Num',
+    lazy    => 1,
+    default => 3,
+);
+
+has sloppy_quorum => (
+    is      => 'rw',
+    isa     => 'Num',
+    lazy    => 1,
+    default => 1,
+);
+
+has n_val => (
+    is      => 'rw',
+    isa     => 'Num',
+    lazy    => 1,
+    default => 1,
+);
+
 has _active_socket => (
     is       => 'rw',
     isa      => 'Maybe[IO::Handle]',
@@ -55,6 +76,9 @@ sub get {
     $req->set_bucket($self->bucket);
     $req->set_key($key);
     $req->set_r($self->read_quorum);
+    $req->set_sloppy_quorum($self->sloppy_quorum);
+    # TODO : available to n_val
+    #$req->set_n_val($self->n_val);
 
     my $h = pack('c', 9) . $req->pack;
     use bytes;
@@ -82,6 +106,10 @@ sub set {
     my $req = Riak::PBC::RpbPutReq->new;
     $req->set_bucket($self->bucket);
     $req->set_key($key);
+    $req->set_w($self->write_quorum);
+    $req->set_sloppy_quorum($self->sloppy_quorum);
+    # TODO : available to n_val
+    #$req->set_n_val($self->n_val);
 
     my $content = Riak::PBC::RpbContent->new;
 
