@@ -7,7 +7,7 @@ use Riak::PBC;
 use Errno qw(EAGAIN EINTR EWOULDBLOCK ECONNRESET);
 use Time::HiRes 'time';
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 has server => (
     is      => 'rw',
@@ -77,8 +77,7 @@ sub get {
     $req->set_key($key);
     $req->set_r($self->read_quorum);
     $req->set_sloppy_quorum($self->sloppy_quorum);
-    # TODO : available to n_val
-    #$req->set_n_val($self->n_val);
+    $req->set_n_val($self->n_val);
 
     my $h = pack('c', 9) . $req->pack;
     use bytes;
@@ -108,8 +107,6 @@ sub set {
     $req->set_key($key);
     $req->set_w($self->write_quorum);
     $req->set_sloppy_quorum($self->sloppy_quorum);
-    # TODO : available to n_val
-    #$req->set_n_val($self->n_val);
 
     my $content = Riak::PBC::RpbContent->new;
 
